@@ -1,0 +1,11 @@
+str
+114
+false
+true
+
+{"name":"rin💞","ids":["ids",114,514]}
+{"root":{"name":"rin💞","ids":["ids",114,514]}}
+{"name":"rin💞","idstr":"rin_sns","friends":[114,514,1919,null,"",true,{"pic":"item.jpg","pic2":"item2.jpg","urls":{"url":["item.,jpg","item2.png"]}}]}
+{"name":"rin💞","idstr":"rin_sns","friends":[114,514,1919,null,"",true,{"pic":"item.jpg","pic2":"item2.jpg","urls":{"url":["item.jpg","item2.png"]}}]}
+rin💞
+Rin.MyJson.JsonArray
