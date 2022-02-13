@@ -1,5 +1,7 @@
 using System.Text;
 
+
+
 namespace Rin.MyJson
 {
     public static class MyJsonEx
@@ -201,6 +203,17 @@ namespace Rin.MyJson
                 };
             }
         }
+        public JsonObject Dic
+        {
+            get
+            {
+                return Value switch
+                {
+                    JsonObject dic => dic,
+                    _ => null
+                };
+            }
+        }
 
         public JsonValue[] Array
         {
@@ -337,6 +350,18 @@ namespace Rin.MyJson
         public void Add((string key, JsonValue val) val)
         {
             this.Dic[val.key] = val.val;
+        }
+
+        public void Remove(string key)
+        {
+            this.Dic.Remove(key);
+        }
+
+
+        public void Remove(params string[] key)
+        {
+            foreach (var n in key)
+                this.Dic.Remove(n);
         }
 
 
