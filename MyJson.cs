@@ -20,28 +20,35 @@ namespace Rin.MyJson
     {
         static ReadOnlySpan<char> _GetObject(char Separator, ReadOnlySpan<char> JsonText, out ReadOnlySpan<char> next)
         {
-            List<(string key, JsonValue val)> list = new List<(string key, JsonValue val)>();
             bool IsInStr = false;
             bool IsInArr = false;
             bool IsInObj = false;
             for (int i = 0; i < JsonText.Length; i++)
             {
-                if (JsonText[i] == '\"')
-                    IsInStr = !IsInStr;
-                if (!IsInStr && JsonText[i] == '[')
-                    IsInArr = true;
-                if (!IsInStr && JsonText[i] == ']')
-                    IsInArr = false;
-                if (!IsInStr && JsonText[i] == '{')
-                    IsInObj = true;
-                if (!IsInStr && JsonText[i] == '}')
-                    IsInObj = false;
-
-
-                if (!IsInStr && !IsInArr && !IsInObj && JsonText[i] == Separator)
+                switch (JsonText[i])
                 {
-                    next = JsonText.Slice(i + 1);
-                    return JsonText.Slice(0, i);
+                    case '\"':
+                        IsInStr = !IsInStr;
+                        continue;
+                    case '[':
+                        IsInArr = true;
+                        continue;
+                    case ']':
+                        IsInArr = false;
+                        continue;
+                    case '{':
+                        IsInObj = true;
+                        continue;
+                    case '}':
+                        IsInObj = false;
+                        continue;
+                    default:
+                        if (!IsInStr && !IsInArr && !IsInObj && JsonText[i] == Separator)
+                        {
+                            next = JsonText.Slice(i + 1);
+                            return JsonText.Slice(0, i);
+                        }
+                        continue;
                 }
             }
             next = null;
@@ -54,7 +61,6 @@ namespace Rin.MyJson
             while (!next.IsEmpty)
             {
                 var obj = _GetObject(',', next, out next);
-
                 var key = _ToKey(obj, out var vstr);
                 var val = _ToValue(vstr);
                 rtn.Add(key, val);
@@ -271,7 +277,7 @@ namespace Rin.MyJson
 
         public JsonValue(ReadOnlySpan<char> str)
         {
-            this.Value = str.ToString();
+            this.Value =   str.ToString();
         }
 
         public JsonValue(decimal num)
@@ -364,10 +370,10 @@ namespace Rin.MyJson
                 this.Dic.Remove(n);
         }
 
-
         public JsonObject()
         {
             Dic = new Dictionary<string, JsonValue>();
         }
     }
 }
+
