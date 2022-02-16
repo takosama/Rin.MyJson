@@ -1,6 +1,5 @@
 using System.Text;
-
-
+using System.Text.RegularExpressions;
 
 namespace Rin.MyJson
 {
@@ -23,6 +22,8 @@ namespace Rin.MyJson
             bool IsInStr = false;
             bool IsInArr = false;
             bool IsInObj = false;
+            int objcnt = 0;
+            int arrcnt = 0;
             for (int i = 0; i < JsonText.Length; i++)
             {
                 switch (JsonText[i])
@@ -31,16 +32,23 @@ namespace Rin.MyJson
                         IsInStr = !IsInStr;
                         continue;
                     case '[':
+                        arrcnt++;
                         IsInArr = true;
                         continue;
                     case ']':
+                        arrcnt--;
+                        if(arrcnt == 0)
                         IsInArr = false;
                         continue;
                     case '{':
                         IsInObj = true;
+                        objcnt++;
                         continue;
                     case '}':
-                        IsInObj = false;
+                        objcnt--;
+                        if(objcnt == 0)
+                            IsInObj = false;
+
                         continue;
                     default:
                         if (!IsInStr && !IsInArr && !IsInObj && JsonText[i] == Separator)
@@ -62,6 +70,10 @@ namespace Rin.MyJson
             {
                 var obj = _GetObject(',', next, out next);
                 var key = _ToKey(obj, out var vstr);
+                if(key== "description")
+                {
+
+                }
                 var val = _ToValue(vstr);
                 rtn.Add(key, val);
             }
@@ -233,11 +245,17 @@ namespace Rin.MyJson
             }
         }
 
+        public static implicit operator string(JsonValue val)
+        {
+            return val.ToString();
+        }
+
+
         public override string ToString()
         {
             return Value switch
             {
-                string value => value,
+                string value =>Regex.Unescape(  value),
                 bool value => value ? "true" : "false",
                 decimal value => value.ToString(),
                 null => null,
@@ -246,6 +264,8 @@ namespace Rin.MyJson
                 _ => ""
             };
         }
+
+
 
         public JsonValue this[string key]
         {
@@ -277,7 +297,7 @@ namespace Rin.MyJson
 
         public JsonValue(ReadOnlySpan<char> str)
         {
-            this.Value =   str.ToString();
+            this.Value = str.ToString();
         }
 
         public JsonValue(decimal num)
@@ -320,9 +340,21 @@ namespace Rin.MyJson
         {
             this.Array = values;
         }
+
+        public override string ToString()
+        {
+     var rtn=       "[" + string.Join(",", this.Array.Select(x => x.ToString())) + "]";
+            return rtn;
+        }
+
     }
     public class JsonObject
     {
+        public override string ToString()
+        {
+            return this.ToJsonText();
+        }
+
         public Dictionary<string, JsonValue> Dic { get; private set; }
 
         public JsonValue this[string key]
@@ -358,16 +390,17 @@ namespace Rin.MyJson
             this.Dic[val.key] = val.val;
         }
 
-        public void Remove(string key)
+        public JsonObject Remove(string key)
         {
             this.Dic.Remove(key);
+            return this;
         }
 
-
-        public void Remove(params string[] key)
+        public JsonObject Remove(params string[] key)
         {
             foreach (var n in key)
                 this.Dic.Remove(n);
+            return this;
         }
 
         public JsonObject()
