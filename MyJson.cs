@@ -1,5 +1,10 @@
 using System.Text;
-using System.Text.RegularExpressions;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Globalization;
+using System.Text.Json;
 
 namespace Rin.MyJson
 {
@@ -17,181 +22,100 @@ namespace Rin.MyJson
     }
     public static class Deserializer
     {
-        static ReadOnlySpan<char> _GetObject(char Separator, ReadOnlySpan<char> JsonText, out ReadOnlySpan<char> next)
-        {
-            bool IsInStr = false;
-            bool IsInArr = false;
-            bool IsInObj = false;
-            int objcnt = 0;
-            int arrcnt = 0;
-            for (int i = 0; i < JsonText.Length; i++)
-            {
-                switch (JsonText[i])
-                {
-                    case '\"':
-                        IsInStr = !IsInStr;
-                        continue;
-                    case '[':
-                        arrcnt++;
-                        IsInArr = true;
-                        continue;
-                    case ']':
-                        arrcnt--;
-                        if(arrcnt == 0)
-                        IsInArr = false;
-                        continue;
-                    case '{':
-                        IsInObj = true;
-                        objcnt++;
-                        continue;
-                    case '}':
-                        objcnt--;
-                        if(objcnt == 0)
-                            IsInObj = false;
-
-                        continue;
-                    default:
-                        if (!IsInStr && !IsInArr && !IsInObj && JsonText[i] == Separator)
-                        {
-                            next = JsonText.Slice(i + 1);
-                            return JsonText.Slice(0, i);
-                        }
-                        continue;
-                }
-            }
-            next = null;
-            return JsonText;
-        }
-        static JsonObject _ToObject(ReadOnlySpan<char> JsonText)
-        {
-            JsonObject rtn = new JsonObject();
-            ReadOnlySpan<char> next = JsonText;
-            while (!next.IsEmpty)
-            {
-                var obj = _GetObject(',', next, out next);
-                var key = _ToKey(obj, out var vstr);
-                if(key== "description")
-                {
-
-                }
-                var val = _ToValue(vstr);
-                rtn.Add(key, val);
-            }
-
-            return rtn;
-        }
-        static string _ToKey(ReadOnlySpan<char> JsonText, out ReadOnlySpan<char> val)
-        {
-            var obj = _GetObject(':', JsonText, out val);
-            return obj[1..^1].ToString();
-        }
-        static JsonArray _ToArray(ReadOnlySpan<char> JsonText)
-        {
-            var str = JsonText;
-            List<JsonValue> list = new List<JsonValue>();
-            while (!str.IsEmpty)
-            {
-                var o = _GetObject(',', str, out str);
-                list.Add(_ToValue(o));
-            }
-            return new JsonArray(list.ToArray());
-        }
-        static JsonValue _ToValue(ReadOnlySpan<char> JsonText)
-        {
-            return JsonText[0] switch
-            {
-                '\"' => new JsonValue(JsonText[1..^1]),
-                '[' => new JsonValue(_ToArray(JsonText[1..^1])),
-                '{' => new JsonValue(_ToObject(JsonText[1..^1])),
-                'f' => new JsonValue(false),
-                't' => new JsonValue(true),
-                'n' => JsonValue.Null,
-                _ => new JsonValue(decimal.Parse(JsonText))
-            };
-        }
         public static JsonObject DeserializeJson(ReadOnlySpan<char> JsonText)
         {
-            if (JsonText[0] == '{' && JsonText[JsonText.Length - 1] == '}')
+            // Preserve the public wrapper API and its decimal number model while
+            // delegating JSON grammar and escape handling to the standard parser.
+            using var document = JsonDocument.Parse(JsonText.ToString(), new JsonDocumentOptions { MaxDepth = 64 });
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new JsonException("The root JSON value must be an object.");
+            return ReadObject(document.RootElement);
+        }
+
+        private static JsonObject ReadObject(JsonElement element)
+        {
+            var result = new JsonObject();
+            foreach (var property in element.EnumerateObject())
+                result.Add(property.Name, ReadValue(property.Value));
+            // JsonObject.Add historically uses last-value-wins for duplicate keys.
+            return result;
+        }
+
+        private static JsonValue ReadValue(JsonElement element)
+        {
+            switch (element.ValueKind)
             {
-                var tmp = _ToObject(JsonText[1..^1]);
-                return tmp;
-            }
-            else
-            {
-                throw new Exception();
+                case JsonValueKind.String: return new JsonValue(element.GetString());
+                case JsonValueKind.Number:
+                    if (!element.TryGetDecimal(out var number))
+                        throw new JsonException("Number is outside the supported decimal range.");
+                    return new JsonValue(number);
+                case JsonValueKind.True: return new JsonValue(true);
+                case JsonValueKind.False: return new JsonValue(false);
+                case JsonValueKind.Null: return JsonValue.Null;
+                case JsonValueKind.Object: return new JsonValue(ReadObject(element));
+                case JsonValueKind.Array:
+                    return new JsonValue(new JsonArray(element.EnumerateArray().Select(ReadValue).ToArray()));
+                default: throw new JsonException("Unsupported JSON value.");
             }
         }
     }
+
     public static class Serializer
     {
-
         public static string SerializeJson(JsonObject json)
         {
-            var rtn = json.ToJString();
-            return rtn;
+            if (json is null) throw new ArgumentNullException(nameof(json));
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+                WriteObject(writer, json, 0);
+            return Encoding.UTF8.GetString(stream.ToArray());
         }
 
-        static string ToJString(this JsonObject json)
+        internal static string SerializeArray(JsonArray json)
         {
-            StringBuilder sb = new StringBuilder();
+            if (json is null) throw new ArgumentNullException(nameof(json));
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+                WriteValue(writer, new JsonValue(json), 0);
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
 
-            sb.Append('{');
-            int cnt = json.Dic.Count;
-            if (cnt > 0)
+        private static void WriteObject(Utf8JsonWriter writer, JsonObject json, int depth)
+        {
+            CheckDepth(depth);
+            writer.WriteStartObject();
+            foreach (var pair in json.Dic)
             {
-                var e = json.Dic.GetEnumerator();
-                for (int i = 0; i < cnt - 1; i++)
-                {
-                    e.MoveNext();
-                    sb.Append('\"');
-                    sb.Append(e.Current.Key);
-                    sb.Append('\"');
-                    sb.Append(':');
-                    sb.Append(e.Current.Value.ToJString());
-                    sb.Append(',');
-                }
-                e.MoveNext();
-                sb.Append('\"');
-                sb.Append(e.Current.Key);
-                sb.Append('\"');
-                sb.Append(':');
-                sb.Append(e.Current.Value.ToJString());
+                writer.WritePropertyName(pair.Key);
+                WriteValue(writer, pair.Value, depth + 1);
             }
-            sb.Append('}');
-            var rtn = sb.ToString();
-            return rtn;
+            writer.WriteEndObject();
         }
 
-        static string ToJString(this JsonValue val)
+        private static void WriteValue(Utf8JsonWriter writer, JsonValue value, int depth)
         {
-            return val.Value switch
+            switch (value?.Value)
             {
-                string value => $"\"{value}\"",
-                bool value => value ? "true" : "false",
-                decimal value => value.ToString(),
-                null => "null",
-                JsonArray array => ToJString(array),
-                JsonObject obj => ToJString(obj),
-                _ => ""
-            };
-        }
-
-        static string ToJString(this JsonArray arr)
-        {
-            var sb = new StringBuilder();
-            sb.Append('[');
-            if (arr.Array.Length > 0)
-            {
-                for (int i = 0; i < arr.Array.Length - 1; i++)
-                {
-                    sb.Append(arr.Array[i].ToJString());
-                    sb.Append(',');
-                }
-                sb.Append(arr.Array[arr.Array.Length - 1].ToJString());
+                case null: writer.WriteNullValue(); break;
+                case string text: writer.WriteStringValue(text); break;
+                case bool boolean: writer.WriteBooleanValue(boolean); break;
+                case decimal number: writer.WriteNumberValue(number); break;
+                case JsonObject obj: WriteObject(writer, obj, depth); break;
+                case JsonArray array:
+                    CheckDepth(depth);
+                    writer.WriteStartArray();
+                    foreach (var item in array.Array) WriteValue(writer, item, depth + 1);
+                    writer.WriteEndArray();
+                    break;
+                default: throw new JsonException("Unsupported JSON value.");
             }
-            sb.Append(']');
+        }
 
-            return sb.ToString();
+        private static void CheckDepth(int depth)
+        {
+            // Also bounds cycles in publicly mutable JsonObject.Dic / JsonArray.Array.
+            if (depth >= 64) throw new JsonException("Maximum JSON depth exceeded.");
         }
     }
     public class JsonValue
@@ -255,9 +179,9 @@ namespace Rin.MyJson
         {
             return Value switch
             {
-                string value =>Regex.Unescape(  value),
+                string value => value,
                 bool value => value ? "true" : "false",
-                decimal value => value.ToString(),
+                decimal value => value.ToString(CultureInfo.InvariantCulture),
                 null => null,
                 JsonArray arr => arr.ToString(),
                 JsonObject obj => obj.ToString(),
@@ -343,8 +267,7 @@ namespace Rin.MyJson
 
         public override string ToString()
         {
-     var rtn=       "[" + string.Join(",", this.Array.Select(x => x.ToString())) + "]";
-            return rtn;
+            return Serializer.SerializeArray(this);
         }
 
     }
